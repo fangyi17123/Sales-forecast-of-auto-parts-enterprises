@@ -13,8 +13,17 @@ from matplotlib import pyplot as plt
 import os
 import sys
 
+train_batch_size = 10#训练批次
+test_batch_size = 100#测试批次
+num_iterations = 1000
+lr = 0.002#学习率
+weight_decay = 0.02#权重更新
+num_neuron=12#隐藏层节点数
+file_dir = os.path.dirname(__file__)
+sys.path.append(file_dir)
 
 class DataHander:
+    #数据处理
     def __init__(self,batch_size):
         self.data_sample = 0
         self.data_label = 0
@@ -23,16 +32,16 @@ class DataHander:
         self.point = 0  # 用于记住下一次pull数据的地方;
         self.batch_size = batch_size
 
-    def get_data(self, sample, label):  # sample 每一行表示一个样本数据, label的每一行表示一个样本的标签.
+    def get_data(self, sample, label): 
         self.data_sample = sample
         self.data_label = label
 
-    def shuffle(self):  # 用于打乱顺序;
+    def shuffle(self):  
         random_sequence = random.sample(range(self.data_sample.shape[0]), self.data_sample.shape[0])
         self.data_sample = self.data_sample[random_sequence]
         self.data_label = self.data_label[random_sequence]
 
-    def pull_data(self):  # 把数据推向输出
+    def pull_data(self):  
         start = self.point
         end = start + self.batch_size
         output_index = np.arange(start, end)
@@ -44,6 +53,7 @@ class DataHander:
         self.point = end % self.data_sample.shape[0]
         
 class Optimizer():
+    #优化策略
     def __init__(self, lr = 0.01, momentum = 0.9, iteration = -1, gamma=0.0005, power=0.75):#初始化
         self.lr = lr
         self.momentum = momentum
@@ -51,18 +61,15 @@ class Optimizer():
         self.gamma = gamma
         self.power = power
     
-    # 固定方法
     def fixed(self):
         return self.lr
 
-    # inv方法
     def anneling(self):
         if self.iteration == -1:
             assert False, '需要在训练过程中,改变update_method 模块里的 iteration 的值'
         self.lr = self.lr * np.power((1 + self.gamma * self.iteration), -self.power)
         return self.lr
 
-    # 基于批量的随机梯度下降法
     def batch_gradient_descent_fixed(self, weights, grad_weights, previous_direction):
         direction = self.momentum * previous_direction + self.lr * grad_weights
         weights_now = weights - direction
@@ -78,14 +85,14 @@ class Optimizer():
         self.iteration = iteration
 
 class Initializer:
-    # xavier 初始化方法
     def xavier(self, num_neuron_inputs, num_neuron_outputs):
         temp1 = np.sqrt(6) / np.sqrt(num_neuron_inputs + num_neuron_outputs + 1)
         weights = stats.uniform.rvs(-temp1, 2 * temp1, (num_neuron_inputs, num_neuron_outputs))
         return weights
 
-class FullyConnectedlayer():
-    def __init__(self, num_neuron_inputs, num_neuron_outputs, batch_size=16,weights_decay=0.001):
+class FullyConnecte():
+    #全连接层
+    def __init__(self, num_neuron_inputs, num_neuron_outputs, batch_size=10,weights_decay=0.001):
         self.num_neuron_inputs = num_neuron_inputs
         self.num_neuron_outputs = num_neuron_outputs
         self.inputs = np.zeros((batch_size, num_neuron_inputs))
@@ -104,7 +111,7 @@ class FullyConnectedlayer():
     def initialize_weights(self, initializer):
         self.weights = initializer(self.num_neuron_inputs, self.num_neuron_outputs)
 
-    # 在正向传播过程中,用于获取输入;
+
     def get_inputs_for_forward(self, inputs):
         self.inputs = inputs
 
@@ -116,16 +123,13 @@ class FullyConnectedlayer():
         self.grad_outputs = grad_outputs
 
     def backward(self):
-        # 求权值的梯度,求得的结果是一个三维的数组,因为有多个样本;
         for i in np.arange(self.batch_size):
-            self.grad_weights[i, :] = np.tile(self.inputs[i, :], (1, 1)).T.dot(np.tile(self.grad_outputs[i, :], (1, 1))) + self.weights * self.weights_decay
-        # 求偏置的梯度;
+            self.grad_weights[i, :] = np.tile(self.inputs[i, :], (1, 1)).T.dot(np.tile(self.grad_outputs[i, :], (1, 1))) + \
+            self.weights * self.weights_decay
         self.grad_bias = self.grad_outputs
-        # 求输入的梯度;
         self.grad_inputs = self.grad_outputs.dot(self.weights.T)
 
     def update(self, optimizer):
-        # 权值与偏置的更新;
         grad_weights_average = np.mean(self.grad_weights, 0)
         grad_bias_average = np.mean(self.grad_bias, 0)
         (self.weights, self.weights_previous_direction) = optimizer(self.weights, grad_weights_average,self.weights_previous_direction)
@@ -136,7 +140,8 @@ class FullyConnectedlayer():
 
     
 
-class ActivationLayer():
+class Activation():
+    #激活层
     def __init__(self, activation_function_name):
         if activation_function_name == 'sigmoid':
             self.activation_function = self.sigmoid
@@ -175,14 +180,12 @@ class ActivationLayer():
     def der_sigmoid(self, x):
         return self.sigmoid(x) * (1 - self.sigmoid(x))
 
-    # tanh函数及其导数的定义
     def tanh(self, x):
         return (np.exp(x) - np.exp(-x)) / (np.exp(x) + np.exp(-x))
 
     def der_tanh(self, x):
         return 1 - self.tanh(x) * self.tanh(x)
 
-    # ReLU函数及其导数的定义
     def relu(self, x):
         temp = np.zeros_like(x)
         if_bigger_zero = (x > temp)
@@ -193,7 +196,6 @@ class ActivationLayer():
         if_bigger_equal_zero = (x >= temp)  # 在零处的导数设为1
         return if_bigger_equal_zero * np.ones_like(x)
 
-    # Identity函数及其导数的定义
     def identity(self, x):
         return x
 
@@ -202,7 +204,8 @@ class ActivationLayer():
 
 
 
-class Losslayer():
+class Loss():
+    #损失函数
     def __init__(self, loss_function_name):
         self.inputs = 0
         self.loss = 0
@@ -230,14 +233,14 @@ class Losslayer():
     def softmax_logloss(self, inputs, label):
         temp1 = np.exp(inputs)
         probability = temp1 / (np.tile(np.sum(temp1, 1), (inputs.shape[1], 1))).T
-        temp3 = np.argmax(label, 1)  # 纵坐标
+        temp3 = np.argmax(label, 1)  
         temp4 = [probability[i, j] for (i, j) in zip(np.arange(label.shape[0]), temp3)]
         loss = -1 * np.mean(np.log(temp4))
         return loss
 
     def der_softmax_logloss(self, inputs, label):
         temp1 = np.exp(inputs)
-        temp2 = np.sum(temp1, 1)  # 它得到的是一维的向量;
+        temp2 = np.sum(temp1, 1)
         probability = temp1 / (np.tile(temp2, (inputs.shape[1], 1))).T
         gradient = probability - label
         return gradient
@@ -263,6 +266,7 @@ class Losslayer():
 
 
 class MetricCalculator():
+    #训练测试指标
     def __init__(self, label, predict):
         self.label = label
         self.predict = predict
@@ -305,15 +309,17 @@ class MetricCalculator():
 
 
 class BPNet():
-    def __init__(self, optimizer = Optimizer.batch_gradient_descent_fixed, initializer = Initializer.xavier, batch_size=16, weights_decay=0.001):
+    #BP网络
+    def __init__(self, optimizer = Optimizer.batch_gradient_descent_fixed, initializer = Initializer.xavier, \
+                 batch_size=train_batch_size, num_neuron=num_neuron,weights_decay=0.001):
         self.optimizer = optimizer
         self.initializer = initializer
         self.batch_size = batch_size
         self.weights_decay = weights_decay
-        self.fc1 = FullyConnectedlayer(6,16,self.batch_size, self.weights_decay)
-        self.ac1 = ActivationLayer('relu')
-        self.fc2 = FullyConnectedlayer(16,1,self.batch_size, self.weights_decay)
-        self.loss = Losslayer("LeastSquareLoss")
+        self.fc1 = FullyConnecte(6,num_neuron,self.batch_size, self.weights_decay)
+        self.ac1 = Activation('relu')
+        self.fc2 = FullyConnecte(num_neuron,1,self.batch_size, self.weights_decay)
+        self.loss = Loss("LeastSquareLoss")
 
     def forward_train(self,input_data, input_label):
         self.fc1.get_inputs_for_forward(input_data)
@@ -323,12 +329,9 @@ class BPNet():
         self.fc2.get_inputs_for_forward(self.ac1.outputs)
         self.fc2.forward()
 
-        print("predict label: \n ", np.concatenate((self.fc2.outputs[:10], input_label[:10]), axis=1))
         self.loss.get_inputs_for_loss(self.fc2.outputs)
         self.loss.get_label_for_loss(input_label)
         self.loss.compute_loss()
-        print("loss: ",self.loss.loss)
-
 
     def backward_train(self):
         self.loss.compute_gradient()
@@ -358,8 +361,8 @@ class BPNet():
         self.fc2.update_batch_size(input_data.shape[0])
         self.fc2.get_inputs_for_forward(self.ac1.outputs)
         self.fc2.forward()
-        print("predict: \n ",self.fc2.outputs[:10])
-        print("label: \n", input_label[:10])
+        #print("predict: \n ",self.fc2.outputs[:10])
+        #print("label: \n", input_label[:10])
         metric = MetricCalculator(label=input_label, predict=self.fc2.outputs)
         metric.get_mae()
         metric.get_mse()
@@ -376,11 +379,10 @@ class BPNet():
 
 
 
-file_dir = os.path.dirname(__file__)
-sys.path.append(file_dir)
+
 
 if __name__ == "__main__":
-    #程序主函数入口
+    #主函数入口
     sales_forecast_data = pd.read_excel("历史数据.xlsx")
     print("data_shape:", sales_forecast_data.shape)
 
@@ -394,27 +396,28 @@ if __name__ == "__main__":
     data_length = data_label.shape[0]
     train_data_length = int(data_length * 0.8)
     print("train_label_length:",train_data_length)
+    
     data_sample_train, data_sample_test = data_sample[:train_data_length], data_sample[train_data_length:]
     data_label_train, data_label_test = data_label[:train_data_length], data_label[train_data_length:]
-    num_iterations = 1000
-    lr = 0.001
-    weight_decay = 0.01
-    train_batch_size = 16
-    test_batch_size = 100
-    data_handler = DataHander(16)
+    
+
+
+    data_handler = DataHander(train_batch_size)
     opt = Optimizer(lr = lr,momentum = 0.9,iteration = 0,gamma = 0.0005,power = 0.75)
     initializer = Initializer()
     data_handler.get_data(sample=data_sample_train,label=data_label_train)
     data_handler.shuffle()
+    
     bpnet = BPNet(optimizer = opt.batch_gradient_descent_anneling, initializer = initializer.xavier, batch_size = train_batch_size, \
                 weights_decay = weight_decay)
     bpnet.initial()
+    
     train_error = []
     max_loss = math.inf
-    early_stopping_iter = 15
+    early_stopping_iter = 35
     early_stopping_mark = 0
+    
     for i in range(num_iterations):
-        print('第', i, '次迭代')
         opt.update_iteration(i)
         data_handler.pull_data()
         bpnet.forward_train(data_handler.output_sample,data_handler.output_label)
@@ -427,8 +430,10 @@ if __name__ == "__main__":
         if early_stopping_mark > early_stopping_iter:
             break
         early_stopping_mark += 1
+    
     plt.plot(train_error)
     plt.show()
+    
     #测试
     bpnet.eval(data_sample_test,data_label_test)
 
