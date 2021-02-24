@@ -13,17 +13,24 @@ from matplotlib import pyplot as plt
 import os
 import sys
 
-train_batch_size = 10#训练批次
+train_batch_size = 12#训练批次
 test_batch_size = 100#测试批次
 num_iterations = 1000
 lr = 0.002#学习率
 weight_decay = 0.02#权重更新
-num_neuron=12#隐藏层节点数
+num_neuron=10#隐藏层节点数
 file_dir = os.path.dirname(__file__)
 sys.path.append(file_dir)
+momentum = 0.6
+iteration = -1
+gamma = 0.0005
+power = 0.75
+train_error = []
+max_loss = math.inf
+early_stopping_iter = 35
+early_stopping_mark = 0
 
-class DataHander:
-    #数据处理
+class Initializer:
     def __init__(self,batch_size):
         self.data_sample = 0
         self.data_label = 0
@@ -52,9 +59,17 @@ class DataHander:
         self.output_label = self.data_label[output_index]
         self.point = end % self.data_sample.shape[0]
         
+    
+    def xavier(self, num_neuron_inputs, num_neuron_outputs):
+        temp1 = np.sqrt(6) / np.sqrt(num_neuron_inputs + num_neuron_outputs + 1)
+        weights = stats.uniform.rvs(-temp1, 2 * temp1, (num_neuron_inputs, num_neuron_outputs))
+        return weights
+
+
+    
 class Optimizer():
     #优化策略
-    def __init__(self, lr = 0.01, momentum = 0.9, iteration = -1, gamma=0.0005, power=0.75):#初始化
+    def __init__(self, lr, momentum, iteration, gamma, power):#初始化
         self.lr = lr
         self.momentum = momentum
         self.iteration = iteration
@@ -84,15 +99,10 @@ class Optimizer():
     def update_iteration(self, iteration):
         self.iteration = iteration
 
-class Initializer:
-    def xavier(self, num_neuron_inputs, num_neuron_outputs):
-        temp1 = np.sqrt(6) / np.sqrt(num_neuron_inputs + num_neuron_outputs + 1)
-        weights = stats.uniform.rvs(-temp1, 2 * temp1, (num_neuron_inputs, num_neuron_outputs))
-        return weights
 
-class FullyConnecte():
+class Netstructure():
     #全连接层
-    def __init__(self, num_neuron_inputs, num_neuron_outputs, batch_size=10,weights_decay=0.001):
+    def __init__(self, num_neuron_inputs, num_neuron_outputs, batch_size,weights_decay):
         self.num_neuron_inputs = num_neuron_inputs
         self.num_neuron_outputs = num_neuron_outputs
         self.inputs = np.zeros((batch_size, num_neuron_inputs))
@@ -216,6 +226,9 @@ class Loss():
         elif loss_function_name == 'LeastSquareLoss':
             self.loss_function = self.least_square_loss
             self.der_loss_function = self.der_least_square_loss
+        elif loss_function_name == 'sigmoid_logloss':
+            self.loss_function = self.sigmoid_logloss
+            self.der_loss_function = self.der_sigmoid_logloss
         else:
             print("wrong loss function")
     def get_label_for_loss(self, label):
@@ -265,47 +278,6 @@ class Loss():
         return gradient
 
 
-class MetricCalculator():
-    #训练测试指标
-    def __init__(self, label, predict):
-        self.label = label
-        self.predict = predict
-        assert len(label)==len(predict), "length of label and predict must be equal"
-        self.mse = None
-        self.rmse = None
-        self.mae = None
-        self.auc = None
-
-    def get_mse(self):
-        self.mse = np.mean(np.sum(np.square(self.label - self.predict),1))
-
-    def get_rmse(self):
-        self.rmse = np.sqrt(np.mean(np.sum(np.square(self.label - self.predict), 1)))
-
-    def get_mae(self):
-        self.mae = np.mean(np.sum(np.abs(self.label - self.predict),1))
-
-    def get_auc(self):
-        prob = self.predict.reshape(-1).tolist()
-        label = self.label.reshape(-1).tolist()
-        f = list(zip(prob, label))
-        rank = [values2 for values1, values2 in sorted(f, key=lambda x: x[0])]
-        rankList = [i + 1 for i in range(len(rank)) if rank[i] == 1]
-        posNum = 0
-        negNum = 0
-        for i in range(len(label)):
-            if (label[i] == 1):
-                posNum += 1
-            else:
-                negNum += 1
-        self.auc = (sum(rankList) - (posNum * (posNum + 1)) / 2) / (posNum * negNum)
-
-    def print_metrics(self):
-        if(self.mse): print("mse: ",self.mse)
-        if(self.rmse): print("rmse: ",self.rmse)
-        if(self.mae): print("mae: ",self.mae)
-        if(self.auc): print("auc: ",self.auc)
-
 
 
 class BPNet():
@@ -316,9 +288,9 @@ class BPNet():
         self.initializer = initializer
         self.batch_size = batch_size
         self.weights_decay = weights_decay
-        self.fc1 = FullyConnecte(6,num_neuron,self.batch_size, self.weights_decay)
+        self.fc1 = Netstructure(6,num_neuron,self.batch_size, self.weights_decay)
         self.ac1 = Activation('relu')
-        self.fc2 = FullyConnecte(num_neuron,1,self.batch_size, self.weights_decay)
+        self.fc2 = Netstructure(num_neuron,1,self.batch_size, self.weights_decay)
         self.loss = Loss("LeastSquareLoss")
 
     def forward_train(self,input_data, input_label):
@@ -361,13 +333,9 @@ class BPNet():
         self.fc2.update_batch_size(input_data.shape[0])
         self.fc2.get_inputs_for_forward(self.ac1.outputs)
         self.fc2.forward()
-        #print("predict: \n ",self.fc2.outputs[:10])
-        #print("label: \n", input_label[:10])
-        metric = MetricCalculator(label=input_label, predict=self.fc2.outputs)
-        metric.get_mae()
-        metric.get_mse()
-        metric.get_rmse()
-        metric.print_metrics()
+        print('mae:',self.get_mae(input_label,self.fc2.outputs))
+        print('mse:',self.get_mse(input_label,self.fc2.outputs))
+        print('rmse:',self.get_rmse(input_label,self.fc2.outputs))
 
     def update(self):
         self.fc1.update(self.optimizer)
@@ -376,7 +344,18 @@ class BPNet():
     def initial(self):
         self.fc1.initialize_weights(self.initializer)
         self.fc2.initialize_weights(self.initializer)
+        
+    def get_mse(self,label,predict):
+        mse = np.mean(np.sum(np.square(label - predict),1))
+        return(mse)
 
+    def get_rmse(self,label,predict):
+        rmse = np.sqrt(np.mean(np.sum(np.square(label - predict), 1)))
+        return(rmse)
+
+    def get_mae(self,label,predict):
+        mae = np.mean(np.sum(np.abs(label - predict),1))
+        return(mae)
 
 
 
@@ -384,7 +363,6 @@ class BPNet():
 if __name__ == "__main__":
     #主函数入口
     sales_forecast_data = pd.read_excel("历史数据.xlsx")
-    print("data_shape:", sales_forecast_data.shape)
 
     data_sample = sales_forecast_data.iloc[:, :-1].values
     data_label = sales_forecast_data.iloc[:, -1].values.reshape(-1,1)
@@ -395,32 +373,29 @@ if __name__ == "__main__":
 
     data_length = data_label.shape[0]
     train_data_length = int(data_length * 0.8)
-    print("train_label_length:",train_data_length)
     
     data_sample_train, data_sample_test = data_sample[:train_data_length], data_sample[train_data_length:]
     data_label_train, data_label_test = data_label[:train_data_length], data_label[train_data_length:]
     
 
 
-    data_handler = DataHander(train_batch_size)
-    opt = Optimizer(lr = lr,momentum = 0.9,iteration = 0,gamma = 0.0005,power = 0.75)
-    initializer = Initializer()
-    data_handler.get_data(sample=data_sample_train,label=data_label_train)
-    data_handler.shuffle()
+    initializer = Initializer(train_batch_size)
+    opt = Optimizer(lr,momentum,iteration,gamma,power)
+    
+    initializer.get_data(sample=data_sample_train,label=data_label_train)
+    initializer.shuffle()
     
     bpnet = BPNet(optimizer = opt.batch_gradient_descent_anneling, initializer = initializer.xavier, batch_size = train_batch_size, \
                 weights_decay = weight_decay)
     bpnet.initial()
     
-    train_error = []
-    max_loss = math.inf
-    early_stopping_iter = 35
-    early_stopping_mark = 0
+
     
     for i in range(num_iterations):
+        print('第多少轮',i)
         opt.update_iteration(i)
-        data_handler.pull_data()
-        bpnet.forward_train(data_handler.output_sample,data_handler.output_label)
+        initializer.pull_data()
+        bpnet.forward_train(initializer.output_sample,initializer.output_label)
         bpnet.backward_train()
         bpnet.update()
         train_error.append(bpnet.loss.loss)
