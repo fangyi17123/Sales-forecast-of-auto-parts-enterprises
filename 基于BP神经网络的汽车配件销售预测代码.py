@@ -392,7 +392,6 @@ if __name__ == "__main__":
 
     
     for i in range(num_iterations):
-        print('第多少轮',i)
         opt.update_iteration(i)
         initializer.pull_data()
         bpnet.forward_train(initializer.output_sample,initializer.output_label)
